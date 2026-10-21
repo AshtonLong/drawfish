@@ -4,7 +4,8 @@ import chess
 from .evaluator import Evaluator
 from .paths import DEFAULT_MODEL
 from .rules import DRAW, Game
-from .search import MCTS, SearchParams
+from .fastsearch import make_search
+from .search import SearchParams
 
 
 class DrawfishEngine:
@@ -12,7 +13,7 @@ class DrawfishEngine:
                  evaluator: Evaluator | None = None):
         self.ev = evaluator or Evaluator(model_path, device=device)
         self.params = params or SearchParams()
-        self.mcts = MCTS(self.ev, self.params)
+        self.mcts = make_search(self.ev, self.params)
 
     def new_game(self):
         self.mcts.reset()
