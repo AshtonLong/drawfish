@@ -98,11 +98,13 @@ class DrawNet(nn.Module):
         self.wdl = nn.Linear(128, 3)
         self.adv = nn.Linear(128, 1)
 
-    def forward(self, feat):
+    def forward(self, feat, draw_head=True):
         x = self.tower(self.inp(expand_features(feat)))
         v = F.relu(self.vfc(self.vconv(x).flatten(1)), inplace=True)
-        return {"wdl": self.wdl(v), "adv": torch.tanh(self.adv(v)).squeeze(1),
-                "pbest": self.pbest(x), "pdraw": self.pdraw(x)}
+        out = {"wdl": self.wdl(v), "adv": torch.tanh(self.adv(v)).squeeze(1), "pbest": self.pbest(x)}
+        if draw_head:
+            out["pdraw"] = self.pdraw(x)
+        return out
 
 
 def save_model(net: DrawNet, path, extra=None):

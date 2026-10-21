@@ -1,0 +1,18 @@
+[package]
+name = "drawfish_core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+shakmaty = "0.30"
+lru = { version = "0.19", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true

@@ -13,7 +13,7 @@ speaks UCI, and comes with a desktop app to play against it.
 In the app you can:
 
 - Pick a colour and set Drawfish's thinking time (0.5–15 s per move; the default 2 s is
-  roughly 10,000 search nodes).
+  roughly 20,000–30,000 search nodes).
 - Move by clicking or dragging.
 - Use **Undo**, **Flip board**, **Load FEN…** and **Copy PGN**.
 - **Offer draw**: Drawfish always accepts. It's a draw maximizer, after all.
@@ -52,7 +52,7 @@ count only by the rules above. A game reaching the 600-ply safety cap would coun
 **not** drawn; none did. Stockfish 19 plays at 100 ms per move, with `UCI_LimitStrength`
 for the rated levels.
 
-**Draw rate vs Stockfish, 32 games per level, Drawfish at 800 nodes/move (~0.15 s):**
+**Draw rate vs Stockfish, 32 games per level, Drawfish at 800 nodes/move (~0.05 s):**
 
 | Opponent | **Drawfish (final)** | Drawfish v1 (pure draw-probability objective) | Same network as an ordinary engine (`Mode Win`) |
 |---|---|---|---|
@@ -69,7 +69,7 @@ version's 117 draws, 87 came by threefold repetition, 26 by stalemating the oppo
 
 ### Thinking time
 
-At 3200 nodes per move (about 0.6 s; the app's default 2 s is roughly 10,000 nodes),
+At 3200 nodes per move (about 0.2 s; the app's default 2 s is roughly 20,000–30,000 nodes),
 16 games each:
 
 | Opponent | 800 nodes | **3200 nodes** |
@@ -132,6 +132,7 @@ same network playing normally built a margin and lost 15× less often against St
 
 **Search engineering.**
 
+- The search runs in Rust (`core/`, see below), the network in PyTorch.
 - PUCT MCTS with batched GPU evaluation and virtual loss.
 - CUDA graphs cut Windows kernel-launch overhead from about 11 ms to 3 ms per batch.
 - CPU tree work is pipelined with GPU inference (+27% speed).
@@ -141,7 +142,41 @@ same network playing normally built a margin and lost 15× less often against St
   That is how the first version once found a checkmate "unavoidable".
 - Transposition cache, tree reuse between moves, and early stopping once the move is
   settled.
-- About 5,000–5,700 nodes/s on a 1070 Ti + 5600X.
+- About 17,000 nodes/s on a 1070 Ti + 5600X (the pure-Python search: about 5,500).
+
+### The Rust search core (`core/`)
+
+`core/` is a line-by-line port of `drawfish/search.py` to Rust (move generation by the
+`shakmaty` crate), built as `drawfish/drawfish_core.dll` and driven from Python by
+`drawfish/fastsearch.py`. In Python, generating moves and walking the tree took longer
+than the network, so the GPU sat idle half the time; in Rust a whole batch takes
+~0.1 ms, and the search runs as fast as the GPU can evaluate positions. The evaluator
+also captures more batch sizes and skips the draw-policy head when `DrawPrior` is 0.
+
+| | nodes/s (20k-node searches, 5 positions) |
+|---|---|
+| Python search | 5,500 |
+| Rust search | 15,200 |
+| Rust search + evaluator changes | **16,800** |
+
+It plays exactly the same moves: `scripts/test_core.py` checks the Rust rules against
+python-chess on ~60,000 positions (legal moves, check, insufficient material, en passant,
+network features, policy indices), and that both searches build identical trees (same
+visit counts and values at every root move) over whole games with tree reuse and
+repetitions. With the real network, 80 of 80 test searches matched exactly. Rerunning the
+800-node match benchmark with the Rust search gave the same total, 117 draws in 192 games
+(100 / 96.9 / 78.1 / 68.8 / 21.9 / 0% from Stockfish 1320 to full strength; level-by-level
+differences are noise from Stockfish's timed moves), and again no wins.
+
+In 2 seconds per move it searches about 20,000–32,000 nodes, against 6,500–10,500 for the
+Python search.
+
+- The DLL is committed, so Rust is only needed to change `core/`: install it from
+  <https://rustup.rs>, then run `coreuild.bat` and `scripts	est_core.py`.
+- Without the DLL, if a position is one the Rust side rejects (an impossible FEN that
+  python-chess accepts), or with `DRAWFISH_SEARCH=python`, the Python search is used.
+- `batch=64` (`bench_match.py --params batch=64`) gives about 20% more nodes/s, but more
+  positions in flight per batch changes the search; it is not the tuned default.
 
 ### The network (`drawfish/model.py`)
 
@@ -234,7 +269,9 @@ Search settings can be tried without retraining, e.g.
 |---|---|
 | `play.py`, `Play Drawfish.bat` | Desktop app |
 | `uci.py`, `Drawfish UCI.bat` | UCI engine |
-| `drawfish/search.py` | Non-zero-sum MCTS (the draw logic) |
+| `drawfish/search.py` | Non-zero-sum MCTS (the draw logic; reference version) |
+| `core/`, `drawfish/fastsearch.py` | The same search in Rust, and its Python driver |
+| `drawfish/drawfish_core.dll` | The built Rust search (rebuild: `coreuild.bat`) |
 | `drawfish/model.py`, `drawfish/evaluator.py` | Network and CUDA-graph inference |
 | `drawfish/encoding.py`, `drawfish/rules.py` | Board/move encoding and draw rules |
 | `drawfish/sfclient.py` | Fast Stockfish UCI client with watchdog |
